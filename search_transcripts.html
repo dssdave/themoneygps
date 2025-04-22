@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript Search</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; background-color: #f4f4f4; color: #333; }
+        #container { max-width: 800px; margin: auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #555; }
+        #searchBox { width: calc(100% - 90px); padding: 10px; margin-right: 5px; border: 1px solid #ccc; border-radius: 4px; }
+        #searchButton { padding: 10px 15px; background-color: #5cb85c; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        #searchButton:hover { background-color: #4cae4c; }
+        #results { margin-top: 20px; }
+        .result-item { border: 1px solid #eee; padding: 15px; margin-bottom: 15px; border-radius: 5px; background-color: #f9f9f9; }
+        .result-item h3 { margin-top: 0; font-size: 1.1em; color: #444; }
+        .result-item p { font-size: 0.95em; color: #555; max-height: 150px; overflow-y: auto; border-top: 1px dashed #ddd; padding-top: 10px; margin-top: 10px; white-space: pre-wrap; /* Helps display the single long line better */ word-wrap: break-word; }
+        mark { background-color: #fcf8e3; padding: 0.2em; border-radius: 3px; }
+        #status { margin-top: 15px; font-style: italic; color: #888; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>What Did The Money GPS Say?</h1>
+        <div>
+            <input type="text" id="searchBox" placeholder="Enter keyword (e.g., lumber)...">
+            <button id="searchButton">Search</button>
+        </div>
+        <div id="status">Loading data...</div>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        let transcriptData = [];
+        const searchBox = document.getElementById('searchBox');
+        const searchButton = document.getElementById('searchButton');
+        const resultsDiv = document.getElementById('results');
+        const statusDiv = document.getElementById('status');
+
+        // Function to fetch and load the search data
+        async function loadData() {
+            try {
+                // Fetch the JSON file created by create_search_index.py
+                const response = await fetch('./search_data.json');
+                if (!response.ok) {
+                    // Provide more specific error feedback
+                    if(response.status === 404) {
+                         throw new Error(`File not found: search_data.json. Did you run create_search_index.py?`);
+                    } else {
+                         throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                }
+                transcriptData = await response.json();
+                statusDiv.textContent = `Data loaded. Ready to search ${transcriptData.length} transcripts.`;
+                console.log(`Loaded ${transcriptData.length} transcripts.`);
+            } catch (error) {
+                statusDiv.textContent = `Error loading search data: ${error}. Make sure 'search_data.json' exists in the same folder and the simple Python HTTP server is running in that folder.`;
+                console.error('Error loading search data:', error);
+            }
+        }
+
+        // Function to perform search and display results
+        function performSearch() {
+            const query = searchBox.value.trim().toLowerCase();
+            resultsDiv.innerHTML = ''; // Clear previous results
+
+            if (!query) {
+                statusDiv.textContent = 'Please enter a search term.';
+                return;
+            }
+            if (transcriptData.length === 0) {
+                statusDiv.textContent = 'Search data not loaded or empty. Check console for errors.';
+                return;
+            }
+
+            statusDiv.textContent = `Searching for "${query}"...`;
+            let foundCount = 0;
+            const resultsHtml = [];
+
+            // Use requestAnimationFrame to avoid blocking UI during search on large datasets
+            let index = 0;
+            function searchBatch() {
+                const batchStartTime = performance.now();
+                // Process for a limited time (e.g., 50ms) or up to a certain number of records
+                while(performance.now() - batchStartTime < 50 && index < transcriptData.length) {
+                    const item = transcriptData[index];
+                    // Ensure item.text exists and is a string before calling toLowerCase
+                    const textLower = (item.text && typeof item.text === 'string') ? item.text.toLowerCase() : '';
+
+                    if (textLower.includes(query)) {
+                        foundCount++;
+                        // Highlight the keyword (simple implementation)
+                        // Create a regex to find all occurrences, case-insensitive
+                        // Escape special regex characters in the user query
+                        const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                        const regex = new RegExp(escapedQuery, 'gi');
+
+                        // Replace occurrences with marked version - showing full text
+                        // Handle cases where item.text might be missing
+                        const textToDisplay = item.text || '[No text content found]';
+                        const highlightedText = textToDisplay.replace(regex, (match) => `<mark>${match}</mark>`);
+
+                        // Safely access date and title, provide fallbacks
+                        const displayDate = item.date || 'No Date';
+                        const displayTitle = item.title || 'No Title';
+                        const displayFilename = item.filename || 'No Filename';
+
+                        resultsHtml.push(`
+                            <div class="result-item">
+                                <h3>${displayDate} - ${displayTitle}</h3>
+                                <p><small>Filename: ${displayFilename}</small></p>
+                                <p>${highlightedText}</p> 
+                            </div>
+                        `);
+                    }
+                    index++;
+                }
+
+                if (index < transcriptData.length) {
+                    // Schedule next batch
+                    requestAnimationFrame(searchBatch);
+                    statusDiv.textContent = `Searching... (${index}/${transcriptData.length})`;
+                } else {
+                    // Search finished
+                    resultsDiv.innerHTML = resultsHtml.join(''); // Display all results at once
+                    statusDiv.textContent = `Found ${foundCount} results for "${query}".`;
+                }
+            }
+             requestAnimationFrame(searchBatch); // Start the first batch
+        }
+
+        // Event Listeners
+        searchButton.addEventListener('click', performSearch);
+        searchBox.addEventListener('keypress', function(event) {
+            // Trigger search on Enter key press
+            if (event.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        // Load data when the page loads
+        window.onload = loadData;
+    </script>
+</body>
+</html>
