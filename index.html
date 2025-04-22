@@ -17,8 +17,13 @@
         .search-options label { margin-left: 5px; font-size: 0.9em; color: #666; cursor: pointer;}
         #results { margin-top: 20px; }
         .result-item { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 5px; background-color: #f9f9f9; }
-        .result-item h3 { margin-top: 0; font-size: 1.0em; color: #444; margin-bottom: 5px;} /* Reduced margin */
-        /* Just show match quality */
+        .result-item h3 { margin-top: 0; font-size: 1.0em; color: #444; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;} /* Flex for title and button */
+        .result-item h3 span { flex-grow: 1; margin-right: 10px;} /* Allow title to take space */
+        .yt-search-button {
+            font-size: 0.8em; padding: 3px 8px; color: #fff; background-color: #c4302b; /* YouTube Red */
+            border-radius: 4px; text-decoration: none; white-space: nowrap;
+        }
+        .yt-search-button:hover { background-color: #a32824; }
         .result-item .meta { font-size: 0.8em; color: #777; margin-bottom: 8px; }
         .result-item p { font-size: 0.9em; color: #555; max-height: 120px; overflow-y: auto; border-top: 1px dashed #ddd; padding-top: 8px; margin-top: 8px; white-space: pre-wrap; word-wrap: break-word; }
         mark { background-color: #fcf8e3; padding: 0.2em; border-radius: 3px; }
@@ -42,7 +47,7 @@
 
     <script>
         let transcriptData = [];
-        let fuse;
+        let fuse = null; // Initialize fuse as null
         const searchBox = document.getElementById('searchBox');
         const searchButton = document.getElementById('searchButton');
         const fuzzyToggle = document.getElementById('fuzzyToggle');
@@ -54,29 +59,36 @@
             includeScore: true,
             threshold: 0.4,
             ignoreLocation: true,
+            minMatchCharLength: 2, // Don't match on single characters if query is short
         };
 
+        // Function to initialize Fuse.js - only called when needed
+        function initializeFuse() {
+             if (!fuse && transcriptData.length > 0) {
+                 console.log("Initializing Fuse.js...");
+                 try {
+                     fuse = new Fuse(transcriptData, fuseOptions);
+                     console.log("Fuse.js initialized.");
+                 } catch (error) {
+                     console.error("Error initializing Fuse.js:", error);
+                     statusDiv.textContent = "Error preparing approximate search.";
+                     fuse = null; // Ensure it's null if init fails
+                 }
+             }
+             return fuse !== null;
+        }
+
         async function loadData() {
-            // ... (loadData function remains mostly the same) ...
             try {
                 const response = await fetch('./search_data.json');
-                 if (!response.ok) {
-                    if(response.status === 404) {
-                         throw new Error(`File not found: search_data.json. Did you run create_search_index.py and push it to GitHub?`);
-                    } else {
-                         throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                }
+                if (!response.ok) { /* ... error handling ... */ throw new Error(`HTTP error! Status: ${response.status}`); }
                 transcriptData = await response.json();
-                // Initialize Fuse within the try block after data is loaded
-                fuse = new Fuse(transcriptData, fuseOptions);
                 statusDiv.textContent = `Data loaded. Ready to search ${transcriptData.length} transcripts.`;
-                console.log(`Loaded ${transcriptData.length} transcripts and initialized Fuse.js`);
+                console.log(`Loaded ${transcriptData.length} transcripts.`);
+                 // Don't initialize Fuse here anymore
             } catch (error) {
                 statusDiv.textContent = `Error loading search data: ${error}.`;
                 console.error('Error loading search data:', error);
-                // Ensure fuse is not used if initialization fails
-                fuse = null;
             }
         }
 
@@ -85,22 +97,35 @@
             const useFuzzy = fuzzyToggle.checked;
             resultsDiv.innerHTML = '';
 
-            if (!query) { /* ... */ return; }
-            if (transcriptData.length === 0) { /* ... */ return; }
-            if (useFuzzy && !fuse) { /* ... */ return; }
+            if (!query) { statusDiv.textContent = 'Please enter a search term.'; return; }
+            if (transcriptData.length === 0) { statusDiv.textContent = 'Search data not loaded.'; return; }
+
+            // Initialize Fuse only if needed for fuzzy search
+            if (useFuzzy && !initializeFuse()) {
+                statusDiv.textContent = 'Could not initialize approximate search. Try exact match.';
+                return;
+            }
 
             const searchType = useFuzzy ? 'approximate' : 'exact';
             statusDiv.textContent = `Searching for "${query}" (${searchType} match)...`;
             let searchResults = [];
             let foundCount = 0;
-            let errorOccurred = false; // Flag for fuzzy search errors
+            const MAX_FUZZY_RESULTS = 30; // Limit displayed results for fuzzy search
 
-            try { // Wrap the search logic in a try block
+
+            try {
                 if (useFuzzy) {
                     const fuseResults = fuse.search(query);
                     searchResults = fuseResults;
                     foundCount = searchResults.length;
+                     // Sort by score and limit results AFTER getting the full count
+                     searchResults.sort((a, b) => a.score - b.score);
+                     if (searchResults.length > MAX_FUZZY_RESULTS) {
+                         searchResults = searchResults.slice(0, MAX_FUZZY_RESULTS);
+                     }
+
                 } else {
+                    // --- Exact Search ---
                     const queryLower = query.toLowerCase();
                     const exactMatches = [];
                     transcriptData.forEach(item => {
@@ -111,17 +136,11 @@
                         }
                     });
                     searchResults = exactMatches;
-                    foundCount = searchResults.length;
+                    foundCount = searchResults.length; // Total found, even if not all displayed
                 }
 
                 const resultsHtml = [];
-                // Sort fuzzy results by score before displaying
-                if (useFuzzy) {
-                    searchResults.sort((a, b) => a.score - b.score);
-                }
-
-                // Process and display results
-                searchResults.forEach(result => {
+                searchResults.forEach(result => { // This loop now processes limited results for fuzzy
                     const item = result.item;
                     const score = result.score;
 
@@ -133,6 +152,11 @@
                     const displayDate = item.date || 'No Date';
                     const displayTitle = item.title || 'No Title';
 
+                    // 2. Construct YouTube Search URL
+                    const youtubeSearchBase = "youtube.com";
+                    const encodedTitle = encodeURIComponent(displayTitle); // URL-encode title
+                    const youtubeSearchUrl = `${youtubeSearchBase}${encodedTitle}`;
+
                     let matchQualityDisplay = '';
                     if (useFuzzy) {
                         const relevancePercent = Math.max(0, (1 - score) * 100);
@@ -141,26 +165,34 @@
                         matchQualityDisplay = '(Exact Match)';
                     }
 
-                    // 3. Removed Filename from here
                     resultsHtml.push(`
                         <div class="result-item">
-                            <h3>${displayDate} - ${displayTitle}</h3>
+                            <h3>
+                                <span>${displayDate} - ${displayTitle}</span>
+                                <a href="${youtubeSearchUrl}" target="_blank" class="yt-search-button">Search on YouTube</a>
+                             </h3>
                             <div class="meta">
                                 <small>${matchQualityDisplay}</small>
                             </div>
                             <p>${highlightedText}</p>
                         </div>
                     `);
-                }); // end of forEach loop
+                });
 
                 resultsDiv.innerHTML = resultsHtml.join('');
-                statusDiv.textContent = `Found ${foundCount} results for "${query}" (${searchType} match). ${useFuzzy ? '(Higher % is better)' : ''}`;
+                let resultSummary = `Found ${foundCount} results for "${query}" (${searchType} match).`;
+                if (useFuzzy && foundCount > MAX_FUZZY_RESULTS) {
+                    resultSummary += ` Displaying top ${MAX_FUZZY_RESULTS}.`;
+                }
+                 if (useFuzzy) {
+                     resultSummary += ' (Higher % is better)';
+                 }
+                statusDiv.textContent = resultSummary;
 
             } catch (error) {
-                errorOccurred = true;
                 console.error(`Error during ${searchType} search:`, error);
                 statusDiv.textContent = `An error occurred during the ${searchType} search. Please check the console.`;
-                resultsDiv.innerHTML = `<p style="color: red;">Search failed. Too much data or a mobile browser issue might be the cause.</p>`;
+                resultsDiv.innerHTML = `<p style="color: red;">Search failed. Reloading the page might help.</p>`;
             }
         }
 
