@@ -17,14 +17,23 @@
         .search-options label { margin-left: 5px; font-size: 0.9em; color: #666; cursor: pointer;}
         #results { margin-top: 20px; }
         .result-item { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 5px; background-color: #f9f9f9; }
-        .result-item h3 { margin-top: 0; font-size: 1.0em; color: #444; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;} /* Flex for title and button */
-        .result-item h3 span { flex-grow: 1; margin-right: 10px;} /* Allow title to take space */
-        .yt-search-button {
-            font-size: 0.8em; padding: 3px 8px; color: #fff; background-color: #c4302b; /* YouTube Red */
+        .result-item h3 { margin-top: 0; font-size: 1.0em; color: #444; margin-bottom: 5px; } /* Title only now */
+        /* 2. Style the meta div for score and button layout */
+        .result-item .meta {
+            display: flex;
+            justify-content: space-between; /* Pushes items apart */
+            align-items: center; /* Vertically aligns items */
+            font-size: 0.8em;
+            color: #777;
+            margin-bottom: 8px;
+        }
+         .yt-search-button {
+            font-size: 1em; /* Relative to parent (.meta) */
+            padding: 3px 8px; color: #fff; background-color: #c4302b;
             border-radius: 4px; text-decoration: none; white-space: nowrap;
+            margin-left: 10px; /* Space between score and button */
         }
         .yt-search-button:hover { background-color: #a32824; }
-        .result-item .meta { font-size: 0.8em; color: #777; margin-bottom: 8px; }
         .result-item p { font-size: 0.9em; color: #555; max-height: 120px; overflow-y: auto; border-top: 1px dashed #ddd; padding-top: 8px; margin-top: 8px; white-space: pre-wrap; word-wrap: break-word; }
         mark { background-color: #fcf8e3; padding: 0.2em; border-radius: 3px; }
         #status { margin-top: 15px; font-style: italic; color: #888; font-size: 0.9em; }
@@ -47,7 +56,7 @@
 
     <script>
         let transcriptData = [];
-        let fuse = null; // Initialize fuse as null
+        let fuse = null;
         const searchBox = document.getElementById('searchBox');
         const searchButton = document.getElementById('searchButton');
         const fuzzyToggle = document.getElementById('fuzzyToggle');
@@ -59,33 +68,34 @@
             includeScore: true,
             threshold: 0.4,
             ignoreLocation: true,
-            minMatchCharLength: 2, // Don't match on single characters if query is short
+            minMatchCharLength: 2,
         };
 
-        // Function to initialize Fuse.js - only called when needed
         function initializeFuse() {
              if (!fuse && transcriptData.length > 0) {
-                 console.log("Initializing Fuse.js...");
+                 console.log(`Initializing Fuse.js on ${transcriptData.length} items...`);
                  try {
+                     const startTime = performance.now();
                      fuse = new Fuse(transcriptData, fuseOptions);
-                     console.log("Fuse.js initialized.");
+                     const endTime = performance.now();
+                     console.log(`Fuse.js initialized in ${(endTime - startTime).toFixed(2)} ms.`);
                  } catch (error) {
                      console.error("Error initializing Fuse.js:", error);
                      statusDiv.textContent = "Error preparing approximate search.";
-                     fuse = null; // Ensure it's null if init fails
+                     fuse = null;
                  }
              }
              return fuse !== null;
         }
 
         async function loadData() {
-            try {
+            // ... (loadData function remains the same) ...
+             try {
                 const response = await fetch('./search_data.json');
-                if (!response.ok) { /* ... error handling ... */ throw new Error(`HTTP error! Status: ${response.status}`); }
+                 if (!response.ok) { /* ... error handling ... */ throw new Error(`HTTP error! Status: ${response.status}`); }
                 transcriptData = await response.json();
                 statusDiv.textContent = `Data loaded. Ready to search ${transcriptData.length} transcripts.`;
                 console.log(`Loaded ${transcriptData.length} transcripts.`);
-                 // Don't initialize Fuse here anymore
             } catch (error) {
                 statusDiv.textContent = `Error loading search data: ${error}.`;
                 console.error('Error loading search data:', error);
@@ -97,8 +107,8 @@
             const useFuzzy = fuzzyToggle.checked;
             resultsDiv.innerHTML = '';
 
-            if (!query) { statusDiv.textContent = 'Please enter a search term.'; return; }
-            if (transcriptData.length === 0) { statusDiv.textContent = 'Search data not loaded.'; return; }
+            if (!query) { /* ... */ return; }
+            if (transcriptData.length === 0) { /* ... */ return; }
 
             // Initialize Fuse only if needed for fuzzy search
             if (useFuzzy && !initializeFuse()) {
@@ -110,20 +120,22 @@
             statusDiv.textContent = `Searching for "${query}" (${searchType} match)...`;
             let searchResults = [];
             let foundCount = 0;
-            const MAX_FUZZY_RESULTS = 30; // Limit displayed results for fuzzy search
-
+            const MAX_FUZZY_RESULTS_DISPLAY = 30; // Limit displayed results
 
             try {
                 if (useFuzzy) {
-                    const fuseResults = fuse.search(query);
+                    console.log(`Starting fuzzy search for: "${query}" on ${transcriptData.length} items...`); // 4. More logging
+                    const startTime = performance.now();
+                    const fuseResults = fuse.search(query); // This might be the heavy part
+                    const endTime = performance.now();
+                    console.log(`Fuse search completed in ${(endTime - startTime).toFixed(2)} ms. Found ${fuseResults.length} potential matches.`); // 4. More logging
+
                     searchResults = fuseResults;
                     foundCount = searchResults.length;
-                     // Sort by score and limit results AFTER getting the full count
-                     searchResults.sort((a, b) => a.score - b.score);
-                     if (searchResults.length > MAX_FUZZY_RESULTS) {
-                         searchResults = searchResults.slice(0, MAX_FUZZY_RESULTS);
-                     }
-
+                    searchResults.sort((a, b) => a.score - b.score);
+                    if (searchResults.length > MAX_FUZZY_RESULTS_DISPLAY) {
+                        searchResults = searchResults.slice(0, MAX_FUZZY_RESULTS_DISPLAY);
+                    }
                 } else {
                     // --- Exact Search ---
                     const queryLower = query.toLowerCase();
@@ -136,11 +148,12 @@
                         }
                     });
                     searchResults = exactMatches;
-                    foundCount = searchResults.length; // Total found, even if not all displayed
+                    foundCount = searchResults.length;
                 }
 
+                console.log(`Processing ${searchResults.length} results for display...`); // 4. More logging
                 const resultsHtml = [];
-                searchResults.forEach(result => { // This loop now processes limited results for fuzzy
+                searchResults.forEach(result => {
                     const item = result.item;
                     const score = result.score;
 
@@ -152,9 +165,9 @@
                     const displayDate = item.date || 'No Date';
                     const displayTitle = item.title || 'No Title';
 
-                    // 2. Construct YouTube Search URL
-                    const youtubeSearchBase = "youtube.com";
-                    const encodedTitle = encodeURIComponent(displayTitle); // URL-encode title
+                    // 1. Correct YouTube Search URL
+                    const youtubeSearchBase = "https://www.youtube.com/results?search_query=";
+                    const encodedTitle = encodeURIComponent(displayTitle);
                     const youtubeSearchUrl = `${youtubeSearchBase}${encodedTitle}`;
 
                     let matchQualityDisplay = '';
@@ -165,32 +178,30 @@
                         matchQualityDisplay = '(Exact Match)';
                     }
 
+                    // 2. Moved Button to meta div
                     resultsHtml.push(`
                         <div class="result-item">
-                            <h3>
-                                <span>${displayDate} - ${displayTitle}</span>
-                                <a href="${youtubeSearchUrl}" target="_blank" class="yt-search-button">Search on YouTube</a>
-                             </h3>
+                            <h3>${displayDate} - ${displayTitle}</h3>
                             <div class="meta">
                                 <small>${matchQualityDisplay}</small>
+                                <a href="${youtubeSearchUrl}" target="_blank" class="yt-search-button">Search on YouTube</a>
                             </div>
                             <p>${highlightedText}</p>
                         </div>
                     `);
-                });
+                }); // end of forEach loop
+                 console.log("Finished processing results for display."); // 4. More logging
 
                 resultsDiv.innerHTML = resultsHtml.join('');
                 let resultSummary = `Found ${foundCount} results for "${query}" (${searchType} match).`;
-                if (useFuzzy && foundCount > MAX_FUZZY_RESULTS) {
-                    resultSummary += ` Displaying top ${MAX_FUZZY_RESULTS}.`;
+                if (useFuzzy && foundCount > MAX_FUZZY_RESULTS_DISPLAY) {
+                    resultSummary += ` Displaying top ${MAX_FUZZY_RESULTS_DISPLAY}.`;
                 }
-                 if (useFuzzy) {
-                     resultSummary += ' (Higher % is better)';
-                 }
+                 if (useFuzzy) { resultSummary += ' (Higher % is better)'; }
                 statusDiv.textContent = resultSummary;
 
             } catch (error) {
-                console.error(`Error during ${searchType} search:`, error);
+                console.error(`Error during ${searchType} search processing:`, error); // Log specific error
                 statusDiv.textContent = `An error occurred during the ${searchType} search. Please check the console.`;
                 resultsDiv.innerHTML = `<p style="color: red;">Search failed. Reloading the page might help.</p>`;
             }
