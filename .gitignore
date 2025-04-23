@@ -14,3 +14,6 @@ archive.txt
 
 # macOS specific file
 .DS_Store
+
+# Node.js modules
+node_modules/
