@@ -1,4 +1,4 @@
-// Filename: api/ai-search.js (with Temporal Comparison & External Knowledge)
+// Filename: api/ai-search.js (Enhanced Context + Citations)
 
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require("@google/generative-ai");
 const fs = require('fs');
@@ -7,37 +7,38 @@ const path = require('path');
 // --- Configuration ---
 const MODEL_NAME = "gemini-1.5-flash";
 const API_KEY = process.env.GEMINI_API_KEY;
-const MAX_CHUNKS_PER_TIMEFRAME = 5; // Max chunks from EACH timeframe for comparison
-const MAX_CHUNKS_GENERAL = 10;     // Max chunks for a general query
-const MAX_CHUNK_LENGTH = 500;      // Approx length of each chunk (chars)
-const MAX_TOTAL_CONTEXT_LENGTH = (MAX_CHUNKS_PER_TIMEFRAME * 2) * MAX_CHUNK_LENGTH * 1.2; // Safety buffer
+const MAX_CHUNKS_PER_TIMEFRAME = 4; // Slightly fewer per timeframe to allow more total context
+const MAX_CHUNKS_GENERAL = 8;
+const MAX_CHUNK_LENGTH = 600; // Slightly longer chunks might help context
+const MAX_TOTAL_CONTEXT_CHARS = MAX_CHUNKS_PER_TIMEFRAME * 2 * MAX_CHUNK_LENGTH; // Rough limit
 // --- End Configuration ---
 
-// --- Load Transcript Data ---
+// --- Load Transcript Data (with date parsing) ---
 const dataPath = path.resolve(process.cwd(), 'search_data.json');
 let transcriptData = [];
 let dataLoadError = null;
 try {
     if (fs.existsSync(dataPath)) {
         const jsonData = fs.readFileSync(dataPath, 'utf-8');
-        // Add a JS Date object to each item during load for easier filtering
         transcriptData = JSON.parse(jsonData).map(item => {
             let date = null;
-            if (item.date && /^\d{8}$/.test(item.date)) { // Basic check for YYYYMMDD
+            let dateString = item.date || "N/A"; // Keep original string too
+            if (item.date && /^\d{8}$/.test(item.date)) {
                 try {
                     const year = parseInt(item.date.substring(0, 4), 10);
-                    const month = parseInt(item.date.substring(4, 6), 10) - 1; // JS months are 0-indexed
+                    const month = parseInt(item.date.substring(4, 6), 10) - 1;
                     const day = parseInt(item.date.substring(6, 8), 10);
-                    // Use UTC to avoid timezone issues during comparison
                     date = new Date(Date.UTC(year, month, day));
-                } catch (e) { console.warn(`Invalid date format for ${item.filename}: ${item.date}`); }
+                } catch (e) { /* ignore */ }
             }
-            return { ...item, jsDate: date }; // Add jsDate property
+            // Ensure unique ID if possible, fallback to filename
+            const uniqueId = item.id || item.filename || `item-${Math.random()}`;
+            return { ...item, jsDate: date, dateString: dateString, uniqueId: uniqueId };
         });
-        // Sort data by date ascending (oldest first) - important for comparisons
         transcriptData.sort((a, b) => (a.jsDate && b.jsDate) ? a.jsDate - b.jsDate : 0);
     } else {
         console.warn(`AI Function: search_data.json not found at ${dataPath}.`);
+        dataLoadError = "Transcript data file not found on server.";
     }
 } catch (error) {
     console.error("AI Function: Error loading/processing search_data.json:", error);
@@ -47,7 +48,6 @@ try {
 
 // --- Helper: Chunking Function ---
 function chunkText(text, maxLength = MAX_CHUNK_LENGTH) {
-    // ... (chunkText function remains the same as previous version) ...
      const chunks = []; const paragraphs = text.split(/\n\s*\n/);
      for (const paragraph of paragraphs) {
          if (!paragraph.trim()) continue;
@@ -63,29 +63,27 @@ function chunkText(text, maxLength = MAX_CHUNK_LENGTH) {
 // Initialize Gemini client
 let genAI;
 let model;
-if (API_KEY) { /* ... */ genAI = new GoogleGenerativeAI(API_KEY); model = genAI.getGenerativeModel({ model: MODEL_NAME }); }
+if (API_KEY) { genAI = new GoogleGenerativeAI(API_KEY); model = genAI.getGenerativeModel({ model: MODEL_NAME }); }
 else { console.error("AI Function: GEMINI_API_KEY not set."); }
 
-// --- Helper: Find Relevant Chunks ---
+// --- Helper: Find Relevant Chunks with Date Filtering ---
 function findRelevantChunks(query, dateRange = null, maxChunks = MAX_CHUNKS_GENERAL) {
     if (transcriptData.length === 0) return [];
-
     const queryLower = query.toLowerCase();
     const queryKeywords = queryLower.split(/\s+/).filter(w => w.length > 2);
     let allChunks = [];
 
     transcriptData.forEach(item => {
-        // Date Filtering
         if (dateRange && item.jsDate) {
             if ((dateRange.start && item.jsDate < dateRange.start) || (dateRange.end && item.jsDate >= dateRange.end)) {
                 return; // Skip item if outside date range
             }
-        } else if (dateRange) {
+        } else if (dateRange && !item.jsDate) {
              return; // Skip if date range specified but item has no valid date
         }
 
         const textChunks = chunkText(item.text || '');
-        textChunks.forEach(chunk => {
+        textChunks.forEach((chunk, chunkIndex) => {
             let score = 0;
             const chunkLower = chunk.toLowerCase();
             const titleLower = (item.title || '').toLowerCase();
@@ -93,8 +91,18 @@ function findRelevantChunks(query, dateRange = null, maxChunks = MAX_CHUNKS_GENE
                 if (chunkLower.includes(word)) score++;
                 if (titleLower.includes(word)) score += 0.5;
             });
+            // Boost score slightly if query is directly in chunk
+            if (chunkLower.includes(queryLower)) score += 1;
+
             if (score > 0) {
-                allChunks.push({ chunkText: chunk, score: score, title: item.title || 'N/A', date: item.date || 'N/A' });
+                allChunks.push({
+                    chunkText: chunk,
+                    score: score,
+                    title: item.title || 'N/A',
+                    date: item.dateString || 'N/A', // Use original date string
+                    filename: item.filename, // Keep filename for potential linking/ID
+                    chunkId: `${item.uniqueId}-${chunkIndex}` // Unique ID for the chunk
+                });
             }
         });
     });
@@ -104,16 +112,18 @@ function findRelevantChunks(query, dateRange = null, maxChunks = MAX_CHUNKS_GENE
 }
 // --- End Helper ---
 
-// --- Helper: Basic Intent Detection ---
+// --- Helper: Basic Intent Detection (Refined) ---
 function detectComparisonIntent(query) {
     const lowerQuery = query.toLowerCase();
-    const comparisonWords = ['compare', 'vs', 'versus', 'what happened after', 'later', 'follow up', 'progress'];
-    const datePattern = /(in|since|after|before|between)\s+(\d{4})/g; // Matches "in 2021", "since 2020" etc.
-    const dateRangePattern = /(\d{4})\s*(-|to|vs)\s*(\d{4})/g; // Matches "2021-2023", "2020 vs 2022"
+    const comparisonWords = ['compare', 'vs', 'versus', 'what happened after', 'later', 'follow up', 'progress', 'evolution', 'change over time'];
+    const datePattern = /\b(in|since|after|before|around|by|from)\s+(\d{4})\b/g;
+    const dateRangePattern = /\b(\d{4})\s*(-|to|vs|through|until)\s*(\d{4})\b/g;
 
     let hasComparisonWord = comparisonWords.some(word => lowerQuery.includes(word));
     let dates = [];
     let match;
+
+    // Extract specific years mentioned
     while ((match = datePattern.exec(lowerQuery)) !== null) {
         dates.push(parseInt(match[2], 10));
     }
@@ -121,18 +131,31 @@ function detectComparisonIntent(query) {
         dates.push(parseInt(match[1], 10));
         dates.push(parseInt(match[3], 10));
     }
+    const distinctYears = [...new Set(dates)].sort((a, b) => a - b);
 
-    // Simple logic: if comparison words OR more than one distinct year mentioned
-    const distinctYears = [...new Set(dates)];
+    // Detect if comparison seems likely
     if (hasComparisonWord || distinctYears.length >= 2) {
-         // Basic extraction of keywords and dates (can be improved)
-         let keywords = query; // Start with full query
-         comparisonWords.forEach(w => keywords = keywords.replace(new RegExp(w, 'gi'), '')); // Remove comparison words
-         dates.sort((a,b) => a-b); // Sort years
-         let dateRange1 = dates.length > 0 ? { end: new Date(Date.UTC(dates[0] + 1, 0, 1)) } : null; // Up to end of first year mentioned
-         let dateRange2 = dates.length > 1 ? { start: new Date(Date.UTC(dates[1], 0, 1)) } : null; // From start of second year mentioned
-         // Crude keyword extraction - better NLP needed for production
-         keywords = keywords.replace(/\d{4}/g, '').replace(/(in|since|after|before|between|vs|to|-)/gi, '').trim();
+         // Basic extraction of keywords and date ranges
+         let keywords = query;
+         comparisonWords.forEach(w => keywords = keywords.replace(new RegExp(w, 'gi'), ''));
+         dates.forEach(y => keywords = keywords.replace(new RegExp(y.toString(), 'g'), ''));
+         keywords = keywords.replace(/(in|since|after|before|around|by|from|vs|to|-|through|until)/gi, '').replace(/\s+/g, ' ').trim();
+
+         // Define date ranges more carefully
+         let dateRange1 = null;
+         let dateRange2 = null;
+         if (distinctYears.length > 0) {
+             // Range 1: Up to the end of the first mentioned year
+             dateRange1 = { end: new Date(Date.UTC(distinctYears[0] + 1, 0, 1)) };
+         }
+          if (distinctYears.length > 1) {
+             // Range 2: From the start of the second (or last if >2) mentioned year onwards
+             dateRange2 = { start: new Date(Date.UTC(distinctYears[distinctYears.length - 1], 0, 1)) };
+          } else if (hasComparisonWord && distinctYears.length === 1) {
+              // If only one year mentioned but comparison words used, look before and after
+              dateRange1 = { end: new Date(Date.UTC(distinctYears[0] + 1, 0, 1)) }; // Before/during year
+              dateRange2 = { start: new Date(Date.UTC(distinctYears[0] + 1, 0, 1)) }; // After year
+          }
 
         return { isComparison: true, keywords: keywords || query, dateRange1, dateRange2 };
     }
@@ -141,8 +164,7 @@ function detectComparisonIntent(query) {
 }
 // --- End Helper ---
 
-
-// Vercel Serverless Function handler
+// --- Main Handler ---
 module.exports = async (request, response) => {
     // --- Initial Checks ---
     if (request.method !== 'POST') return response.status(405).json({ message: 'Method Not Allowed' });
@@ -158,74 +180,92 @@ module.exports = async (request, response) => {
 
         // --- 1. Detect Intent & Find Context ---
         const intent = detectComparisonIntent(query);
-        let context1 = [];
-        let context2 = [];
+        let contextChunks = []; // Will store { title, date, chunkText, chunkId }
         let finalPrompt;
-        let contextUsed = false;
+        let totalChars = 0;
 
         if (intent.isComparison) {
             console.log("Comparison intent detected. Keywords:", intent.keywords);
-            context1 = findRelevantChunks(intent.keywords, intent.dateRange1, MAX_CHUNKS_PER_TIMEFRAME);
-            context2 = findRelevantChunks(intent.keywords, intent.dateRange2, MAX_CHUNKS_PER_TIMEFRAME);
-            console.log(`Found ${context1.length} chunks for timeframe 1, ${context2.length} for timeframe 2.`);
-
-            if (context1.length > 0 || context2.length > 0) {
-                 contextUsed = true;
-                 const context1Text = context1.map(c => `--- Transcript: ${c.title} (${c.date}) ---\n${c.chunkText}`).join('\n\n');
-                 const context2Text = context2.map(c => `--- Transcript: ${c.title} (${c.date}) ---\n${c.chunkText}`).join('\n\n');
-
-                 finalPrompt = `Analyze and compare statements regarding the user query based on the following excerpts from 'The Money GPS' transcripts and your general knowledge. Prioritize transcript information. Be concise.\n\nUser Query: "${query}"\n\nContext from Earlier Period (if any):\n[START CONTEXT A]\n${context1Text || "None found."}\n[END CONTEXT A]\n\nContext from Later Period (if any):\n[START CONTEXT B]\n${context2Text || "None found."}\n[END CONTEXT B]\n\nAnalysis:`;
+            const chunks1 = findRelevantChunks(intent.keywords, intent.dateRange1, MAX_CHUNKS_PER_TIMEFRAME);
+            const chunks2 = findRelevantChunks(intent.keywords, intent.dateRange2, MAX_CHUNKS_PER_TIMEFRAME);
+            console.log(`Found ${chunks1.length} chunks (time 1), ${chunks2.length} (time 2).`);
+            // Combine, ensuring unique chunks and respecting total length limit
+            const combined = [...chunks1, ...chunks2];
+            const seenChunkIds = new Set();
+            for (const chunk of combined) {
+                 if (!seenChunkIds.has(chunk.chunkId) && totalChars + chunk.chunkText.length < MAX_TOTAL_CONTEXT_LENGTH) {
+                     contextChunks.push(chunk);
+                     seenChunkIds.add(chunk.chunkId);
+                     totalChars += chunk.chunkText.length;
+                 }
             }
-        }
+            // Sort combined chunks by date for better flow in prompt
+            contextChunks.sort((a, b) => {
+                const dateA = transcriptData.find(d => d.uniqueId === a.chunkId.split('-')[0])?.jsDate;
+                const dateB = transcriptData.find(d => d.uniqueId === b.chunkId.split('-')[0])?.jsDate;
+                return (dateA && dateB) ? dateA - dateB : 0;
+            });
 
-        // If not a comparison or comparison searches found nothing, do a general search
-        if (!contextUsed) {
+            if (contextChunks.length > 0) {
+                const contextText = contextChunks.map(c => `--- Transcript: ${c.title} (${c.date}) ---\n${c.chunkText}`).join('\n\n');
+                finalPrompt = `Analyze and compare statements regarding the user query based on the following excerpts from 'The Money GPS' transcripts and your general knowledge. Cite the specific transcript titles and dates used in your reasoning. Be concise.\n\nUser Query: "${query}"\n\nRelevant Excerpts (sorted chronologically):\n[START CONTEXT]\n${contextText}\n[END CONTEXT]\n\nAnalysis and Comparison:`;
+            }
+
+        } else { // General Query
             console.log("Performing general context search.");
-            const generalContextChunks = findRelevantChunks(query, null, MAX_CHUNKS_GENERAL);
-            console.log(`Found ${generalContextChunks.length} general context chunks.`);
-
-            if (generalContextChunks.length > 0) {
-                contextUsed = true;
-                const relevantContext = generalContextChunks
-                    .map(chunkInfo => `--- Transcript: ${chunkInfo.title} (${chunkInfo.date}) ---\n${chunkInfo.chunkText}`)
-                    .join('\n\n');
-
-                 // Note: Prompt allows external knowledge now
-                finalPrompt = `Based on the following transcript excerpts from 'The Money GPS' and your general knowledge, answer the user's question concisely. Prioritize information from the transcript context if available.\n\nUser Question: "${query}"\n\nTranscript Context:\n[START CONTEXT]\n${relevantContext}\n[END CONTEXT]\n\nAnswer:`;
+            contextChunks = findRelevantChunks(intent.keywords, null, MAX_CHUNKS_GENERAL);
+            console.log(`Found ${contextChunks.length} general context chunks.`);
+            if (contextChunks.length > 0) {
+                const contextText = contextChunks.map(c => `--- Transcript: ${c.title} (${c.date}) ---\n${c.chunkText}`).join('\n\n');
+                finalPrompt = `Based on the following transcript excerpts from 'The Money GPS' and your general knowledge, answer the user's question concisely. Cite the specific transcript titles and dates used in your reasoning.\n\nUser Question: "${query}"\n\nRelevant Transcript Excerpts:\n[START CONTEXT]\n${contextText}\n[END CONTEXT]\n\nAnswer:`;
             }
         }
 
-        // If still no context found after all searches
-        if (!contextUsed) {
-             console.log("No relevant context found for query.");
-             // Ask Gemini without specific transcript context, allowing general knowledge
-             finalPrompt = `Answer the following question based on your general knowledge: "${query}"`;
-             // Alternatively, return immediately:
-             // return response.status(200).json({ answer: "Sorry, I couldn't find relevant transcript excerpts for your query." });
+        // If no context found at all
+        if (contextChunks.length === 0) {
+            console.log("No relevant context found for query.");
+            finalPrompt = `Answer the following question based on your general knowledge: "${query}" \n(Note: No specific relevant excerpts from 'The Money GPS' transcripts were found for this query).`;
         }
 
         // --- 2. Call Gemini API ---
         console.log("Sending request to Gemini API...");
-        const generationConfig = { temperature: 0.5, maxOutputTokens: 2048 }; // Temp 0.5 allows some interpretation/analysis
-        const safetySettings = [ /* ... Standard safety settings ... */
-             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }, { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }, { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }, { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-         ];
+        const generationConfig = { temperature: 0.6, maxOutputTokens: 2048 }; // Slightly more creative for analysis
+        const safetySettings = [ /* Standard safety settings */ ];
         const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: finalPrompt }] }], generationConfig, safetySettings });
 
-        // --- 3. Process and Return Response ---
+        // --- 3. Process and Return Response (including sources used in context) ---
         const responseCandidate = result?.response?.candidates?.[0];
-        if (!responseCandidate?.content?.parts?.[0]?.text) { /* ... handle blocked/empty response ... */
+        if (!responseCandidate?.content?.parts?.[0]?.text) { /* ... handle blocked/empty ... */
              const finishReason = responseCandidate?.finishReason || 'UNKNOWN'; console.warn("Gemini response blocked/empty. Reason:", finishReason);
              let errorMessage = `AI model response issue (Reason: ${finishReason}).`; if (finishReason === 'SAFETY') errorMessage = 'AI response blocked due to safety settings.';
-             return response.status(200).json({ answer: `Sorry, ${errorMessage}` });
-         }
+             return response.status(200).json({ answer: `Sorry, ${errorMessage}`, sources: [] }); // Return empty sources on error
+        }
         const responseText = responseCandidate.content.parts[0].text;
         console.log("Received response from Gemini.");
-        response.status(200).json({ answer: responseText });
+
+        // Prepare source info based on the context we SENT (Gemini citation is harder)
+        const sourcesUsed = contextChunks.map(chunk => {
+            // Correct Youtube URL Base
+            const youtubeSearchBase = "https://www.youtube.com/results?search_query=";
+            const encodedTitle = encodeURIComponent(chunk.title);
+            const youtubeSearchUrl = `${youtubeSearchBase}${encodedTitle}`;
+            return {
+                title: chunk.title,
+                date: chunk.date,
+                youtubeSearchUrl: youtubeSearchUrl
+            };
+        });
+        // De-duplicate sources based on title and date before sending
+        const uniqueSources = Array.from(new Map(sourcesUsed.map(s => [`${s.title}-${s.date}`, s])).values());
+
+        response.status(200).json({
+            answer: responseText,
+            sources: uniqueSources // Send source info to frontend
+        });
 
     } catch (error) {
         console.error("Error in AI search handler:", error);
         const errorMessage = error.message || 'An unknown server error occurred.';
-        response.status(500).json({ answer: `Sorry, an error occurred processing the AI search: ${errorMessage}` });
+        response.status(500).json({ answer: `Sorry, an error occurred processing the AI search: ${errorMessage}`, sources: [] });
     }
 };
