@@ -6,22 +6,18 @@
     <title>What Did The Money GPS Say? - Search</title>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.min.js"></script>
     <style>
-        /* --- Basic Styles --- */
+        /* --- Styles remain the same as the previous version --- */
         body { font-family: sans-serif; line-height: 1.6; padding: 15px; background-color: #f4f4f4; color: #333; }
         #container { max-width: 800px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #555; font-size: 1.5em; margin-bottom: 15px; }
         mark { background-color: #fcf8e3; padding: 0.2em; border-radius: 3px; }
         .status-message { margin-top: 15px; font-style: italic; color: #888; font-size: 0.9em; min-height: 1.2em; }
         .error-message { color: red; font-weight: bold; }
-
-        /* --- Tabs --- */
         .tab-buttons { border-bottom: 2px solid #eee; padding-bottom: 5px; margin-bottom: 15px; }
         .tab-button { padding: 8px 15px; cursor: pointer; background: #eee; border: none; border-radius: 4px 4px 0 0; margin-right: 5px; font-size: 0.95em; }
         .tab-button.active { background: #fff; border: 2px solid #eee; border-bottom: 2px solid #fff; font-weight: bold; position: relative; top: 2px;}
-        .tab-content { display: none; /* Hide content by default */ }
-        .tab-content.active { display: block; /* Show active content */ }
-
-        /* --- Keyword Search Specific --- */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
         #keywordSearchTab .search-controls { display: flex; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
         #keywordSearchTab #searchBox { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; min-width: 150px; }
         #keywordSearchTab #searchButton { padding: 10px 15px; background-color: #5cb85c; color: white; border: none; border-radius: 4px; cursor: pointer; }
@@ -35,16 +31,13 @@
         .yt-search-button { font-size: 1em; padding: 3px 8px; color: #fff; background-color: #c4302b; border-radius: 4px; text-decoration: none; white-space: nowrap; margin-left: 10px; }
         .yt-search-button:hover { background-color: #a32824; }
         .result-item p { font-size: 0.9em; color: #555; max-height: 120px; overflow-y: auto; border-top: 1px dashed #ddd; padding-top: 8px; margin-top: 8px; white-space: pre-wrap; word-wrap: break-word; }
-
-        /* --- AI Search Specific --- */
         #aiSearchTab .search-controls { display: flex; align-items: center; margin-bottom: 15px; gap: 10px; }
         #aiSearchTab #aiQueryBox { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; min-width: 150px; }
         #aiSearchTab #aiSearchButton { padding: 10px 15px; background-color: #4a90e2; color: white; border: none; border-radius: 4px; cursor: pointer; }
-         #aiSearchTab #aiSearchButton:hover { background-color: #357abd; }
-         #aiSearchTab #aiSearchButton:disabled { background-color: #a0c3e8; cursor: not-allowed; } /* Disabled style */
-        #aiResults { margin-top: 20px; white-space: pre-wrap; /* Preserve formatting from AI */ word-wrap: break-word; background-color: #f0f4f8; border: 1px solid #d0d8e0; padding: 15px; border-radius: 5px; min-height: 50px; }
+        #aiSearchTab #aiSearchButton:hover { background-color: #357abd; }
+        #aiSearchTab #aiSearchButton:disabled { background-color: #a0c3e8; cursor: not-allowed; }
+        #aiResults { margin-top: 20px; white-space: pre-wrap; word-wrap: break-word; background-color: #f0f4f8; border: 1px solid #d0d8e0; padding: 15px; border-radius: 5px; min-height: 50px; }
         #aiStatus { font-size: 0.9em; color: #555; margin-top: 5px; }
-
     </style>
 </head>
 <body>
@@ -65,8 +58,8 @@
                     <label for="fuzzyToggle">Include Approximate Matches</label>
                 </div>
             </div>
-             <div id="keywordStatus" class="status-message">Loading data...</div>
-             <div id="keywordResults"></div>
+            <div id="keywordStatus" class="status-message">Loading data...</div>
+            <div id="keywordResults"></div>
         </div>
 
         <div id="aiSearchTab" class="tab-content">
@@ -99,60 +92,192 @@
 
          // --- Tab Switching Logic ---
          function openTab(evt, tabName) {
-            let i, tabcontent, tablinks;
-            tabcontent = document.getElementsByClassName("tab-content");
-            for (i = 0; i < tabcontent.length; i++) {
-                tabcontent[i].style.display = "none";
-                tabcontent[i].classList.remove("active");
-            }
-            tablinks = document.getElementsByClassName("tab-button");
-            for (i = 0; i < tablinks.length; i++) {
-                tablinks[i].className = tablinks[i].className.replace(" active", "");
-            }
-            document.getElementById(tabName).style.display = "block";
-            document.getElementById(tabName).classList.add("active");
-            evt.currentTarget.className += " active";
+            // ... (Tab logic remains the same as previous version) ...
+             let i, tabcontent, tablinks;
+             tabcontent = document.getElementsByClassName("tab-content");
+             for (i = 0; i < tabcontent.length; i++) { tabcontent[i].style.display = "none"; tabcontent[i].classList.remove("active"); }
+             tablinks = document.getElementsByClassName("tab-button");
+             for (i = 0; i < tablinks.length; i++) { tablinks[i].className = tablinks[i].className.replace(" active", ""); }
+             document.getElementById(tabName).style.display = "block";
+             document.getElementById(tabName).classList.add("active");
+             evt.currentTarget.className += " active";
         }
-        // Initialize first tab on load
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('keywordSearchTab').style.display = 'block';
-            document.getElementById('keywordTabButton').classList.add('active'); // Ensure button active state matches
+            document.getElementById('keywordTabButton').classList.add('active');
             loadData();
         });
 
 
-        // --- Keyword Search Logic ---
-         function initializeFuse() { /* ... same as before ... */
+        // --- Keyword Search Logic (Restored & Verified) ---
+         function initializeFuse() {
             if (fuzzySearchFailed) return false;
             if (!fuse && transcriptData.length > 0) {
-                 console.log(`Initializing Fuse.js on ${transcriptData.length} items...`);
-                 try { fuse = new Fuse(transcriptData, fuseOptions); console.log("Fuse.js initialized."); }
-                 catch (error) { console.error("Error initializing Fuse.js:", error); keywordStatusDiv.innerHTML = `<span class="error-message">Error preparing approx search.</span>`; fuse = null; fuzzyToggle.checked = false; fuzzyToggle.disabled = true; fuzzySearchFailed = true;}
-             } return fuse !== null;
-         }
-         function performKeywordSearch() { /* ... same as before, targets keywordStatusDiv and keywordResultsDiv ... */
-             const query = searchBox.value.trim();
-             if (fuzzySearchFailed) { fuzzyToggle.checked = false; fuzzyToggle.disabled = true; }
-             const useFuzzy = fuzzyToggle.checked && !fuzzySearchFailed;
-             keywordResultsDiv.innerHTML = '';
-             if (!query) { keywordStatusDiv.textContent = 'Please enter a search term.'; return; }
-             if (transcriptData.length === 0) { keywordStatusDiv.textContent = 'Search data not loaded.'; return; }
-             if (useFuzzy && !initializeFuse()) { return; }
-             const searchType = useFuzzy ? 'approximate' : 'exact';
-             keywordStatusDiv.textContent = `Searching for "<span class="math-inline">\{query\}" \(</span>{searchType} match)...`;
-             let searchResults = []; let foundCount = 0; const MAX_FUZZY_RESULTS_DISPLAY = 30;
-             try {
-                if (useFuzzy) { const fuseResults = fuse.search(query); searchResults = fuseResults; foundCount = searchResults.length; searchResults.sort((a, b) => a.score - b.score); if (searchResults.length > MAX_FUZZY_RESULTS_DISPLAY) { searchResults = searchResults.slice(0, MAX_FUZZY_RESULTS_DISPLAY); } }
-                else { const queryLower = query.toLowerCase(); const exactMatches = []; transcriptData.forEach(item => { const textLower = (item.text || '').toLowerCase(); const titleLower = (item.title || '').toLowerCase(); if (textLower.includes(queryLower) || titleLower.includes(queryLower)) { exactMatches.push({ item: item, score: 0 }); } }); searchResults = exactMatches; foundCount = searchResults.length; }
+                console.log(`Initializing Fuse.js on ${transcriptData.length} items...`);
+                try {
+                    const startTime = performance.now();
+                    fuse = new Fuse(transcriptData, fuseOptions);
+                    const endTime = performance.now();
+                    console.log(`Fuse.js initialized in ${(endTime - startTime).toFixed(2)} ms.`);
+                } catch (error) {
+                    console.error("Error initializing Fuse.js:", error);
+                    keywordStatusDiv.innerHTML = `<span class="error-message">Error preparing approximate search. Exact search only.</span>`;
+                    fuse = null; fuzzyToggle.checked = false; fuzzyToggle.disabled = true; fuzzySearchFailed = true;
+                }
+            }
+            return fuse !== null;
+        }
+
+         function performKeywordSearch() {
+            const query = searchBox.value.trim();
+            if (fuzzySearchFailed) { fuzzyToggle.checked = false; fuzzyToggle.disabled = true; }
+            const useFuzzy = fuzzyToggle.checked && !fuzzySearchFailed;
+            keywordResultsDiv.innerHTML = ''; // Clear previous keyword results
+
+            if (!query) { keywordStatusDiv.textContent = 'Please enter a search term.'; return; }
+            if (transcriptData.length === 0) { keywordStatusDiv.textContent = 'Search data not loaded.'; return; }
+            if (useFuzzy && !initializeFuse()) { // Ensure Fuse initializes if needed
+                 // If init fails, message is shown, toggle is disabled, flag set. Force exact search.
+                 if (fuzzySearchFailed) {
+                     keywordStatusDiv.innerHTML = `<span class="error-message">Approximate search failed. Showing exact matches instead.</span>`;
+                     performKeywordSearch(); // Re-run as exact
+                     return;
+                 } else {
+                     keywordStatusDiv.textContent = 'Approximate search is still initializing...'; // Should be rare
+                     return;
+                 }
+            }
+
+            const searchType = useFuzzy ? 'approximate' : 'exact';
+            keywordStatusDiv.textContent = `Searching for "${query}" (${searchType} match)...`;
+            let searchResults = [];
+            let foundCount = 0;
+            const MAX_FUZZY_RESULTS_DISPLAY = 30;
+
+            try {
+                if (useFuzzy && fuse) { // Ensure fuse exists before using
+                    console.log(`Starting fuzzy search for: "${query}" on ${transcriptData.length} items...`);
+                    const startTime = performance.now();
+                    const fuseResults = fuse.search(query);
+                    const endTime = performance.now();
+                    console.log(`Fuse search completed in ${(endTime - startTime).toFixed(2)} ms. Found ${fuseResults.length} potential matches.`);
+                    searchResults = fuseResults;
+                    foundCount = searchResults.length;
+                    searchResults.sort((a, b) => a.score - b.score);
+                    if (searchResults.length > MAX_FUZZY_RESULTS_DISPLAY) {
+                        searchResults = searchResults.slice(0, MAX_FUZZY_RESULTS_DISPLAY);
+                    }
+                } else { // Exact Search path
+                    const queryLower = query.toLowerCase();
+                    const exactMatches = [];
+                    transcriptData.forEach(item => {
+                        const textLower = (item.text || '').toLowerCase();
+                        const titleLower = (item.title || '').toLowerCase();
+                        if (textLower.includes(queryLower) || titleLower.includes(queryLower)) {
+                            exactMatches.push({ item: item, score: 0 }); // Ensure consistent format
+                        }
+                    });
+                    searchResults = exactMatches;
+                    foundCount = searchResults.length;
+                }
+
+                console.log(`Processing ${searchResults.length} results for display...`);
                 const resultsHtml = [];
-                searchResults.forEach(result => { const item = result.item; const score = result.score; const escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'); const regex = new RegExp(escapedQuery, 'gi'); const textToDisplay = item.text || '[No text content found]'; const highlightedText = textToDisplay.replace(regex, (match) => `<mark>${match}</mark>`); const displayDate = item.date || 'No Date'; const displayTitle = item.title || 'No Title'; const youtubeSearchBase = "https://www.youtube.com/results?search_query="; const encodedTitle = encodeURIComponent(displayTitle); const youtubeSearchUrl = `<span class="math-inline">\{youtubeSearchBase\}</span>{encodedTitle}`; let matchQualityDisplay = useFuzzy ? `(Match: ${Math.max(0, (1 - score) * 100).toFixed(0)}%)` : '(Exact Match)'; resultsHtml.push(`<div class="result-item"><h3>${displayDate} - <span class="math-inline">\{displayTitle\}</h3\><div class\="meta"\><small\></span>{matchQualityDisplay}</small><a href="<span class="math-inline">\{youtubeSearchUrl\}" target\="\_blank" class\="yt\-search\-button"\>Search on YouTube</a\></div\><p\></span>{highlightedText}</p></div>`); });
-                keywordResultsDiv.innerHTML = resultsHtml.join('');
-                let resultSummary = `Found <span class="math-inline">\{foundCount\} results for "</span>{query}" (${searchType} match).`; if (useFuzzy && foundCount > MAX_FUZZY_RESULTS_DISPLAY) { resultSummary += ` Displaying top ${MAX_FUZZY_RESULTS_DISPLAY}.`; } if (useFuzzy) { resultSummary += ' (Higher % is better)'; } keywordStatusDiv.textContent = resultSummary;
-             } catch (error) { console.error(`Error during ${searchType} search processing:`, error); if(useFuzzy) { keywordStatusDiv.innerHTML = `<span class="error-message">Approximate search failed. Use exact search.</span>`; fuzzyToggle.checked = false; fuzzyToggle.disabled = true; fuzzySearchFailed = true; keywordResultsDiv.innerHTML = ''; } else { keywordStatusDiv.innerHTML = `<span class="error-message">Error displaying results.</span>`; } }
+                // Check if searchResults is actually an array before looping
+                if(Array.isArray(searchResults)) {
+                     searchResults.forEach(result => {
+                        // --- Ensure 'result' and 'result.item' are valid before accessing properties ---
+                        if (!result || !result.item) {
+                            console.warn("Skipping invalid search result item:", result);
+                            return; // Skip this iteration
+                        }
+                        const item = result.item;
+                        const score = result.score; // Might be undefined for exact, handle below
+
+                        // Escape query for regex ONLY if it contains special characters AFTER basic trim
+                        let escapedQuery = query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                        let regex;
+                        try {
+                             regex = new RegExp(escapedQuery, 'gi');
+                        } catch(e) {
+                             console.warn("Could not create regex from query, using basic highlighting:", e);
+                             regex = null; // Fallback or handle differently
+                        }
+
+                        const textToDisplay = item.text || '[No text content found]';
+                        let highlightedText = textToDisplay; // Default to no highlight
+                        if (regex) { // Only highlight if regex is valid
+                             highlightedText = textToDisplay.replace(regex, (match) => `<mark>${match}</mark>`);
+                        } else { // Basic fallback highlight (less accurate for special chars)
+                             const queryLower = query.toLowerCase();
+                             let startIndex = 0;
+                             let tempHtml = '';
+                             let textLower = textToDisplay.toLowerCase();
+                             while ((startIndex = textLower.indexOf(queryLower, startIndex)) > -1) {
+                                 tempHtml += textToDisplay.substring(0, startIndex) + `<mark>${textToDisplay.substring(startIndex, startIndex + query.length)}</mark>`;
+                                 startIndex += query.length;
+                                 textToDisplay = textToDisplay.substring(startIndex);
+                                 textLower = textLower.substring(startIndex);
+                                 startIndex = 0;
+                             }
+                             highlightedText = tempHtml + textToDisplay; // Add remaining text
+                        }
+
+
+                        const displayDate = item.date || 'No Date';
+                        const displayTitle = item.title || 'No Title';
+                        const youtubeSearchBase = "https://www.youtube.com/results?search_query=";
+                        const encodedTitle = encodeURIComponent(displayTitle);
+                        const youtubeSearchUrl = `${youtubeSearchBase}${encodedTitle}`;
+
+                        let matchQualityDisplay = '';
+                         // Check if score is a number before using toFixed
+                         if (useFuzzy && typeof score === 'number') {
+                             const relevancePercent = Math.max(0, (1 - score) * 100);
+                             matchQualityDisplay = `(Match: ${relevancePercent.toFixed(0)}%)`;
+                         } else if (!useFuzzy) {
+                             matchQualityDisplay = '(Exact Match)';
+                         } else {
+                              matchQualityDisplay = '(Approx Match)'; // Fallback if score missing
+                         }
+
+                        resultsHtml.push(`
+                            <div class="result-item">
+                                <h3>${displayDate} - ${displayTitle}</h3>
+                                <div class="meta">
+                                    <small>${matchQualityDisplay}</small>
+                                    <a href="${youtubeSearchUrl}" target="_blank" class="yt-search-button">Search on YouTube</a>
+                                </div>
+                                <p>${highlightedText}</p>
+                            </div>`);
+                    }); // end of forEach loop
+                 } else {
+                     console.error("searchResults is not an array:", searchResults);
+                     keywordStatusDiv.innerHTML = `<span class="error-message">Error processing search results.</span>`;
+                 }
+
+                console.log("Finished processing results for display.");
+                keywordResultsDiv.innerHTML = resultsHtml.join(''); // Display results
+
+                let resultSummary = `Found ${foundCount} results for "${query}" (${searchType} match).`;
+                if (useFuzzy && foundCount > MAX_FUZZY_RESULTS_DISPLAY) { resultSummary += ` Displaying top ${MAX_FUZZY_RESULTS_DISPLAY}.`; }
+                if (useFuzzy) { resultSummary += ' (Higher % is better)'; }
+                keywordStatusDiv.textContent = resultSummary;
+
+            } catch (error) { // Catch errors during search or result processing
+                console.error(`Error during ${searchType} search processing:`, error);
+                 if(useFuzzy) {
+                     keywordStatusDiv.innerHTML = `<span class="error-message">Approximate search failed. Try exact search.</span>`;
+                     fuzzyToggle.checked = false; fuzzyToggle.disabled = true; fuzzySearchFailed = true;
+                     keywordResultsDiv.innerHTML = '';
+                 } else {
+                     keywordStatusDiv.innerHTML = `<span class="error-message">An error occurred displaying results. Check console.</span>`;
+                 }
+            }
          }
 
 
-        // --- AI Search Logic ---
+        // --- AI Search Logic (Placeholder - Not Functional Yet) ---
          async function performAiSearch() {
             const query = aiQueryBox.value.trim();
             if (!query) {
@@ -160,33 +285,30 @@
                 return;
             }
 
-            aiStatusDiv.textContent = 'Asking AI... Contacting server... (this may take several moments)';
-            aiResultsDiv.textContent = ''; // Clear previous AI results
-            aiSearchButton.disabled = true; // Prevent multiple clicks
+            aiStatusDiv.textContent = 'Asking AI... Contacting server...';
+            aiResultsDiv.textContent = '';
+            aiSearchButton.disabled = true;
 
             try {
                 console.log("Sending request to /api/ai-search with query:", query);
-                const response = await fetch('/api/ai-search', { // Call the backend function
+                const response = await fetch('/api/ai-search', { // Call the backend
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: query }) // Send query in body
+                    body: JSON.stringify({ query: query })
                 });
 
-                const data = await response.json(); // Get JSON response
+                const data = await response.json();
 
                 if (!response.ok) {
-                    // Use message from backend if available, otherwise generic error
-                    throw new Error(data.answer || `Server responded with status: ${response.status}`);
+                    throw new Error(data.answer || `Server error: ${response.status}`);
                 }
-
-                // Display the answer from Gemini
+                // Display the answer
                 aiResultsDiv.textContent = data.answer;
                 aiStatusDiv.textContent = 'AI response received:';
 
             } catch (error) {
                 console.error('AI Search Fetch Error:', error);
-                // Display specific error
-                aiResultsDiv.innerHTML = `<span class="error-message">Error getting AI response: ${error.message || 'Network or server error.'}</span>`;
+                aiResultsDiv.innerHTML = `<span class="error-message">Error getting AI response: ${error.message || 'Network/server error.'}</span>`;
                 aiStatusDiv.textContent = 'Failed to get AI response.';
             } finally {
                  aiSearchButton.disabled = false; // Re-enable button
@@ -196,19 +318,19 @@
         // --- Initial Data Load ---
         async function loadData() {
              try {
-                const response = await fetch('./search_data.json');
-                if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); }
-                transcriptData = await response.json();
-                keywordStatusDiv.textContent = `Data loaded. Ready to search ${transcriptData.length} transcripts.`; // Update keyword status
-                aiStatusDiv.textContent = 'Enter your question above. AI will search relevant transcripts.'; // Set initial AI status
-                console.log(`Loaded ${transcriptData.length} transcripts.`);
-            } catch (error) {
-                const errorMsg = `Error loading search data: ${error}. Search will not work.`;
-                keywordStatusDiv.textContent = errorMsg;
-                aiStatusDiv.textContent = errorMsg; // Show error in both tabs
-                console.error('Error loading search data:', error);
-            }
-        }
+                 const response = await fetch('./search_data.json');
+                 if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); }
+                 transcriptData = await response.json();
+                 keywordStatusDiv.textContent = `Data loaded. Ready to search ${transcriptData.length} transcripts.`;
+                 aiStatusDiv.textContent = 'Enter your question above. AI will search relevant transcripts.';
+                 console.log(`Loaded ${transcriptData.length} transcripts.`);
+             } catch (error) {
+                 const errorMsg = `Error loading search data: ${error}. Search will not work.`;
+                 keywordStatusDiv.textContent = errorMsg;
+                 aiStatusDiv.textContent = errorMsg;
+                 console.error('Error loading search data:', error);
+             }
+         }
 
         // --- Keyword Search Event Listeners ---
         searchButton.addEventListener('click', function(event) { event.preventDefault(); performKeywordSearch(); });
