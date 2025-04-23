@@ -15,5 +15,6 @@ archive.txt
 # macOS specific file
 .DS_Store
 
-# Node.js modules
-node_modules/
+# Python Indexing Files (if you created them)
+.py_venv/
+.env
