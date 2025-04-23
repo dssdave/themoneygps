@@ -1,19 +1,18 @@
-// Filename: api/ai-search.js
+// Filename: api/ai-search.js (with Chunking)
 
-// Using require for Node.js environment in Vercel Serverless Functions
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require("@google/generative-ai");
 const fs = require('fs');
 const path = require('path');
 
 // --- Configuration ---
-const MODEL_NAME = "gemini-1.5-flash"; // Use the latest flash model
-const API_KEY = process.env.GEMINI_API_KEY; // Get API key from Vercel Env Vars
-const MAX_CONTEXT_EXCERPTS = 5; // Max transcript excerpts to send as context
-const MAX_EXCERPT_LENGTH = 1500; // Max characters per excerpt
+const MODEL_NAME = "gemini-1.5-flash";
+const API_KEY = process.env.GEMINI_API_KEY;
+const MAX_CONTEXT_CHUNKS = 10; // How many relevant chunks to find
+const MAX_CHUNK_LENGTH = 500;  // Approx length of each chunk (characters)
+const MAX_TOTAL_CONTEXT_LENGTH = MAX_CONTEXT_CHUNKS * MAX_CHUNK_LENGTH * 1.2; // Safety buffer for total context
 // --- End Configuration ---
 
 // --- Load Transcript Data ---
-// Resolve path relative to project root (where vercel deploys from)
 const dataPath = path.resolve(process.cwd(), 'search_data.json');
 let transcriptData = [];
 let dataLoadError = null;
@@ -21,7 +20,6 @@ try {
     if (fs.existsSync(dataPath)) {
         const jsonData = fs.readFileSync(dataPath, 'utf-8');
         transcriptData = JSON.parse(jsonData);
-        // console.log(`AI Function: Loaded ${transcriptData.length} transcripts.`); // Keep console cleaner in production
     } else {
         console.warn(`AI Function: search_data.json not found at ${dataPath}. Contextual search disabled.`);
     }
@@ -31,143 +29,154 @@ try {
 }
 // --- End Load Transcript Data ---
 
-// Initialize Gemini client (only if API key is present)
+// --- Helper: Chunking Function ---
+function chunkText(text, maxLength = MAX_CHUNK_LENGTH) {
+    const chunks = [];
+    // Simple chunking by splitting paragraphs first, then sentences.
+    const paragraphs = text.split(/\n\s*\n/); // Split by blank lines (paragraphs)
+    for (const paragraph of paragraphs) {
+        if (!paragraph.trim()) continue;
+        // If paragraph is short enough, add it as one chunk
+        if (paragraph.length <= maxLength) {
+            chunks.push(paragraph);
+        } else {
+            // If paragraph is too long, split by sentences (simple approach)
+            // Regex tries to split by sentence-ending punctuation followed by space/newline
+            const sentences = paragraph.split(/(?<=[.?!])\s+/);
+            let currentChunk = "";
+            for (const sentence of sentences) {
+                if (!sentence.trim()) continue;
+                if (currentChunk.length + sentence.length + 1 <= maxLength) {
+                    currentChunk += (currentChunk ? " " : "") + sentence;
+                } else {
+                    // Add current chunk if it has content
+                    if (currentChunk) chunks.push(currentChunk);
+                    // Start new chunk, handle sentence longer than max length
+                    currentChunk = sentence.length <= maxLength ? sentence : sentence.substring(0, maxLength) + "...";
+                }
+            }
+            // Add the last chunk if it has content
+            if (currentChunk) chunks.push(currentChunk);
+        }
+    }
+    return chunks.filter(chunk => chunk.trim() !== ''); // Ensure no empty chunks
+}
+// --- End Helper ---
+
+
+// Initialize Gemini client
 let genAI;
 let model;
-if (API_KEY) {
+if (API_KEY) { /* ... same init logic ... */
     genAI = new GoogleGenerativeAI(API_KEY);
     model = genAI.getGenerativeModel({ model: MODEL_NAME });
-} else {
-    console.error("AI Function: GEMINI_API_KEY environment variable not set.");
-}
+} else { console.error("AI Function: GEMINI_API_KEY not set."); }
 
-// Vercel Serverless Function handler (Node.js runtime)
+// Vercel Serverless Function handler
 module.exports = async (request, response) => {
-    // Check if POST request
-    if (request.method !== 'POST') {
-        return response.status(405).json({ message: 'Method Not Allowed' });
-    }
-
-    // Check if API key is configured
-    if (!genAI || !model) {
-         return response.status(500).json({ answer: 'AI Service is not configured correctly on the server (API Key might be missing).' });
-    }
-
-    // Check if data loaded correctly (return error if it failed)
-    if (dataLoadError) {
-        return response.status(500).json({ answer: dataLoadError });
-    }
-     if (transcriptData.length === 0 && !dataLoadError){
-         // Data file might be empty or just wasn't found but didn't error
-         console.warn("AI Function: Transcript data is empty. Cannot provide context.");
-         // Proceed without context? Or return error? Let's return an informative message.
-         // return response.status(200).json({ answer: "Transcript data is not available on the server for contextual search." });
-         // Fallback: Allow non-contextual query (remove return above if you want this)
-     }
-
+    if (request.method !== 'POST') { /* ... */ return response.status(405).json({ message: 'Method Not Allowed' }); }
+    if (!genAI || !model) { /* ... */ return response.status(500).json({ answer: 'AI Service not configured.' }); }
+    if (dataLoadError) { /* ... */ return response.status(500).json({ answer: dataLoadError }); }
 
     try {
         const { query } = request.body;
-        if (!query || typeof query !== 'string' || query.trim() === '') {
-            return response.status(400).json({ answer: 'Query is required and must be a non-empty string.' });
-        }
+        if (!query || typeof query !== 'string' || query.trim() === '') { /* ... */ return response.status(400).json({ answer: 'Query required.' }); }
 
         console.log("AI Search Query Received:", query);
 
-        // --- 1. Find Relevant Context (Simple Keyword Filter) ---
-        let relevantExcerpts = "";
-        let foundExcerptsCount = 0;
+        // --- 1. Find Relevant Context (Chunk-Based Keyword Filter) ---
+        let relevantContext = "";
+        let foundChunksCount = 0;
 
         if (transcriptData.length > 0) {
             const queryLower = query.toLowerCase();
-            const queryKeywords = queryLower.split(/\s+/).filter(w => w.length > 2); // Get keywords > 2 chars
+            const queryKeywords = queryLower.split(/\s+/).filter(w => w.length > 2);
+            let allChunks = [];
 
-            const scoredMatches = transcriptData.map(item => {
-                let score = 0;
-                const textLower = (item.text || '').toLowerCase();
-                const titleLower = (item.title || '').toLowerCase();
-                queryKeywords.forEach(word => {
-                    if (textLower.includes(word)) score++;
-                    if (titleLower.includes(word)) score += 2; // Weight title matches more
+            // Create chunks from all transcripts and score them
+            transcriptData.forEach(item => {
+                const textChunks = chunkText(item.text || '');
+                textChunks.forEach(chunk => {
+                    let score = 0;
+                    const chunkLower = chunk.toLowerCase();
+                    const titleLower = (item.title || '').toLowerCase();
+                    queryKeywords.forEach(word => {
+                        if (chunkLower.includes(word)) score++;
+                        // Optionally weight title match for chunks from that transcript
+                        if (titleLower.includes(word)) score += 0.5; // Lower weight for title now
+                    });
+                    if (score > 0) {
+                        allChunks.push({
+                            chunkText: chunk,
+                            score: score,
+                            title: item.title || 'N/A',
+                            date: item.date || 'N/A'
+                        });
+                    }
                 });
-                return { item, score };
-            }).filter(scoredItem => scoredItem.score > 0)
-              .sort((a, b) => b.score - a.score); // Sort highest score first
+            });
 
-            foundExcerptsCount = Math.min(scoredMatches.length, MAX_CONTEXT_EXCERPTS);
+            // Sort all found chunks by score
+            allChunks.sort((a, b) => b.score - a.score);
 
-            relevantExcerpts = scoredMatches
-                .slice(0, foundExcerptsCount)
-                .map(scoredItem => {
-                    const item = scoredItem.item;
-                    const textExcerpt = (item.text || '').substring(0, MAX_EXCERPT_LENGTH);
-                    // Format for clarity in the prompt
-                    return `--- Transcript: ${item.title || 'N/A'} (${item.date || 'N/A'}) ---\n${textExcerpt}${item.text && item.text.length > MAX_EXCERPT_LENGTH ? '...' : ''}`;
-                })
-                .join('\n\n'); // Separate excerpts clearly
+            // Select top chunks for context, respecting total length
+            let currentContextLength = 0;
+            const selectedChunks = [];
+            for (const chunkInfo of allChunks) {
+                if (foundChunksCount >= MAX_CONTEXT_CHUNKS) break;
+                if (currentContextLength + chunkInfo.chunkText.length > MAX_TOTAL_CONTEXT_LENGTH) break;
+
+                selectedChunks.push(chunkInfo);
+                currentContextLength += chunkInfo.chunkText.length;
+                foundChunksCount++;
+            }
+
+            // Format the selected chunks for the prompt
+            relevantContext = selectedChunks
+                .map(chunkInfo => `--- Transcript: ${chunkInfo.title} (${chunkInfo.date}) ---\n${chunkInfo.chunkText}`)
+                .join('\n\n');
         }
+         // --- End Context Finding ---
 
-         // --- 2. Format Prompt for Gemini (REVISED STRUCTURE) ---
+         // --- 2. Format Prompt & Call Gemini ---
          let finalPrompt;
-         if (foundExcerptsCount > 0) {
-              console.log(`Found ${foundExcerptsCount} relevant excerpts for context.`);
-              // Structure: Provide context first, then ask the question based *only* on it.
+         if (foundChunksCount > 0) {
+              console.log(`Found ${foundChunksCount} relevant chunks for context.`);
               finalPrompt = `Context from 'The Money GPS' transcripts:
 [START CONTEXT]
-${relevantExcerpts}
+${relevantContext}
 [END CONTEXT]
 
 Based ONLY on the provided context above, answer the following user question concisely: "${query}"
 If the answer is not found in the context, state that the information is not available in the provided excerpts.
 Answer:`;
          } else {
-              console.log("No relevant excerpts found. Informing user.");
-              // Return a direct message instead of querying Gemini without context
+              console.log("No relevant chunks found. Informing user.");
               return response.status(200).json({ answer: "Sorry, I couldn't find specific transcript excerpts matching your keywords to answer that question." });
          }
 
-        // --- 3. Call Gemini API ---
+        // --- (Call Gemini API - same as before) ---
         console.log("Sending request to Gemini API...");
-        const generationConfig = {
-            temperature: 0.3, // Slightly higher for potentially more nuanced answers based on context
-            topK: 1, // Default often fine
-            topP: 1, // Default often fine
-            maxOutputTokens: 2048,
-        };
-         const safetySettings = [ // Standard safety settings
-            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        ];
+        const generationConfig = { temperature: 0.3, maxOutputTokens: 2048 };
+        const safetySettings = [ /* ... Standard safety settings ... */
+             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }, { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }, { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }, { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+         ];
 
-         const result = await model.generateContent({
-             contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
-             generationConfig,
-             safetySettings,
-         });
+        const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: finalPrompt }] }], generationConfig, safetySettings });
 
-        // --- 4. Process and Return Response ---
-         const responseCandidate = result?.response?.candidates?.[0];
-
-         if (!responseCandidate?.content?.parts?.[0]?.text) {
-             const finishReason = responseCandidate?.finishReason || 'UNKNOWN';
-             console.warn("Gemini response was blocked or empty. Reason:", finishReason);
-             let errorMessage = `AI model did not provide a valid response (Reason: ${finishReason}).`;
-             if (finishReason === 'SAFETY') {
-                 errorMessage = 'AI response may have been blocked due to safety settings.';
-             }
-             // Return status 200 but with the error message in the answer field
+        // --- (Process and Return Response - same as before) ---
+        const responseCandidate = result?.response?.candidates?.[0];
+        if (!responseCandidate?.content?.parts?.[0]?.text) { /* ... handle blocked/empty response ... */
+             const finishReason = responseCandidate?.finishReason || 'UNKNOWN'; console.warn("Gemini response blocked/empty. Reason:", finishReason);
+             let errorMessage = `AI model response issue (Reason: ${finishReason}).`; if (finishReason === 'SAFETY') errorMessage = 'AI response blocked due to safety settings.';
              return response.status(200).json({ answer: `Sorry, ${errorMessage}` });
-         }
-
+        }
         const responseText = responseCandidate.content.parts[0].text;
         console.log("Received response from Gemini.");
         response.status(200).json({ answer: responseText });
 
     } catch (error) {
         console.error("Error in AI search handler:", error);
-        // Provide a slightly more informative error if possible
         const errorMessage = error.message || 'An unknown server error occurred.';
         response.status(500).json({ answer: `Sorry, an error occurred processing the AI search: ${errorMessage}` });
     }
